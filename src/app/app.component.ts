@@ -345,7 +345,7 @@ export class AppComponent implements OnInit {
         this.clientes.set(this.asArray<Cliente>(clientes));
         this.productos.set(this.asArray<Producto>(productos));
         this.ventas.set(this.asArray<Venta>(ventas));
-        this.sagaLogs.set(this.asArray<SagaLog>(sagaLogs));
+        this.sagaLogs.set(this.sortSagaLogs(this.asArray<SagaLog>(sagaLogs)));
         this.ensureDefaultSelections();
       })
       .catch((err) => this.error.set(this.readError(err, 'No se pudieron cargar los datos de administracion.')))
@@ -522,7 +522,7 @@ export class AppComponent implements OnInit {
           this.loadAdminDashboard();
         },
         error: (err) => {
-          this.error.set(this.readError(err, simularFalloDespuesDescuento ? 'La prueba de compensacion fallo de forma controlada.' : 'La Saga fallo de forma controlada.'));
+          this.error.set(this.readSagaError(err, simularFalloDespuesDescuento ? 'No se pudo completar tu compra. Intenta nuevamente.' : 'La Saga fallo de forma controlada.'));
           this.loadAdminDashboard();
         }
       });
@@ -846,6 +846,28 @@ export class AppComponent implements OnInit {
       return value.value;
     }
     return [];
+  }
+
+  private sortSagaLogs(logs: SagaLog[]): SagaLog[] {
+    return [...logs].sort((a, b) =>
+      new Date(b.fecha || 0).getTime() - new Date(a.fecha || 0).getTime()
+    );
+  }
+
+  private readSagaError(err: unknown, fallback: string): string {
+    if (err instanceof HttpErrorResponse) {
+      const body = err.error;
+      if (body?.message) {
+        return body.message;
+      }
+      if (typeof body === 'string' && body.trim()) {
+        return body;
+      }
+      if (err.status === 0) {
+        return 'No hay conexion con el backend.';
+      }
+    }
+    return fallback;
   }
 
   private readClientCheckoutError(err: unknown): string {
