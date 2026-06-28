@@ -2,7 +2,7 @@ import { CommonModule, CurrencyPipe, DatePipe, DecimalPipe } from '@angular/comm
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, OnInit, computed, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { finalize, firstValueFrom } from 'rxjs';
+import { finalize, firstValueFrom, Observable } from 'rxjs';
 
 interface LoginResponse {
   token: string;
@@ -339,19 +339,55 @@ export class AppComponent implements OnInit {
     this.loading.set(true);
 
     Promise.all([
-      firstValueFrom(this.http.get<Cliente[] | { value: Cliente[] }>('/api/clientes')),
-      firstValueFrom(this.http.get<Producto[] | { value: Producto[] }>('/api/productos')),
-      firstValueFrom(this.http.get<Venta[] | { value: Venta[] }>('/api/ventas')),
-      firstValueFrom(this.http.get<SagaLog[] | { value: SagaLog[] }>('/api/ventas/saga-logs'))
+      this.safeRequest(this.http.get<Cliente[] | { value: Cliente[] }>('/api/clientes')),
+      this.safeRequest(this.http.get<Producto[] | { value: Producto[] }>('/api/productos')),
+      this.safeRequest(this.http.get<Venta[] | { value: Venta[] }>('/api/ventas')),
+      this.safeRequest(this.http.get<SagaLog[] | { value: SagaLog[] }>('/api/ventas/saga-logs'))
     ])
       .then(([clientes, productos, ventas, sagaLogs]) => {
-        this.clientes.set(this.asArray<Cliente>(clientes));
-        this.productos.set(this.asArray<Producto>(productos));
-        this.ventas.set(this.asArray<Venta>(ventas));
-        this.sagaLogs.set(this.sortSagaLogs(this.asArray<SagaLog>(sagaLogs)));
+        let firstError: unknown = null;
+
+        if (clientes.ok) {
+          this.clientes.set(this.asArray<Cliente>(clientes.value));
+        } else {
+          firstError = firstError || clientes.error;
+        }
+
+        if (productos.ok) {
+          this.productos.set(this.asArray<Producto>(productos.value));
+        } else {
+          firstError = firstError || productos.error;
+        }
+
+        if (ventas.ok) {
+          this.ventas.set(this.asArray<Venta>(ventas.value));
+        } else {
+          firstError = firstError || ventas.error;
+        }
+
+        if (sagaLogs.ok) {
+          this.sagaLogs.set(this.sortSagaLogs(this.asArray<SagaLog>(sagaLogs.value)));
+        } else {
+          firstError = firstError || sagaLogs.error;
+        }
+
         this.ensureDefaultSelections();
+        if (firstError) {
+          this.error.set(this.readError(firstError, 'No se pudieron cargar todos los datos de administracion.'));
+        }
       })
-      .catch((err) => this.error.set(this.readError(err, 'No se pudieron cargar los datos de administracion.')))
+      .finally(() => this.loading.set(false));
+  }
+
+  loadSagaLogs(clearExistingMessages = true): void {
+    if (clearExistingMessages) {
+      this.clearMessages();
+    }
+    this.loading.set(true);
+
+    firstValueFrom(this.http.get<SagaLog[] | { value: SagaLog[] }>('/api/ventas/saga-logs'))
+      .then((logs) => this.sagaLogs.set(this.sortSagaLogs(this.asArray<SagaLog>(logs))))
+      .catch((err) => this.error.set(this.readError(err, 'No se pudieron cargar los Saga logs.')))
       .finally(() => this.loading.set(false));
   }
 
@@ -758,7 +794,7 @@ export class AppComponent implements OnInit {
   selectAdminTab(tab: AdminTab): void {
     this.adminTab.set(tab);
     if (tab === 'logs') {
-      this.loadAdminDashboard();
+      this.loadSagaLogs();
       return;
     }
     this.clearMessages();
@@ -895,12 +931,27 @@ export class AppComponent implements OnInit {
     this.clientAuthError.set(message);
   }
 
-  private asArray<T>(value: T[] | { value: T[] } | undefined | null): T[] {
+  private safeRequest<T>(request: Observable<T>): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
+    return firstValueFrom(request)
+      .then((value) => ({ ok: true, value }) as const)
+      .catch((error) => ({ ok: false, error }) as const);
+  }
+
+  private asArray<T>(value: T[] | { value?: T[]; content?: T[]; data?: T[]; items?: T[] } | undefined | null): T[] {
     if (Array.isArray(value)) {
       return value;
     }
     if (value && 'value' in value && Array.isArray(value.value)) {
       return value.value;
+    }
+    if (value && 'content' in value && Array.isArray(value.content)) {
+      return value.content;
+    }
+    if (value && 'data' in value && Array.isArray(value.data)) {
+      return value.data;
+    }
+    if (value && 'items' in value && Array.isArray(value.items)) {
+      return value.items;
     }
     return [];
   }
@@ -932,10 +983,39 @@ export class AppComponent implements OnInit {
       return '';
     }
 
+    const tieneZona = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(fecha);
+    if (tieneZona) {
+      const parsed = new Date(fecha);
+      if (!Number.isNaN(parsed.getTime())) {
+        return new Intl.DateTimeFormat('es-PE', {
+          timeZone: 'America/Lima',
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        }).format(parsed);
+      }
+    }
+
     const limpia = fecha.split('.')[0];
     const [datePart, timePart] = limpia.split('T');
     if (!datePart || !timePart) {
       return fecha;
+    }
+
+    const parsedAsUtc = new Date(limpia + 'Z');
+    if (!Number.isNaN(parsedAsUtc.getTime())) {
+      return new Intl.DateTimeFormat('es-PE', {
+        timeZone: 'America/Lima',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).format(parsedAsUtc);
     }
 
     const [year, month, day] = datePart.split('-');
@@ -952,7 +1032,44 @@ export class AppComponent implements OnInit {
       return 0;
     }
 
+    const tieneZona = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(fecha);
+    if (tieneZona) {
+      const parsed = new Date(fecha);
+      if (!Number.isNaN(parsed.getTime())) {
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'America/Lima',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hourCycle: 'h23'
+        }).formatToParts(parsed);
+        const value = (type: string) => parts.find((part) => part.type === type)?.value ?? '00';
+
+        return Number(value('year') + value('month') + value('day') + value('hour') + value('minute') + value('second'));
+      }
+    }
+
     const limpia = fecha.split('.')[0];
+    const parsedAsUtc = new Date(limpia + 'Z');
+    if (!Number.isNaN(parsedAsUtc.getTime())) {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Lima',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23'
+      }).formatToParts(parsedAsUtc);
+      const value = (type: string) => parts.find((part) => part.type === type)?.value ?? '00';
+
+      return Number(value('year') + value('month') + value('day') + value('hour') + value('minute') + value('second'));
+    }
+
     const [datePart, timePart = '00:00:00'] = limpia.split('T');
     const [year, month, day] = datePart.split('-').map((value) => Number(value));
     const [hour = 0, minute = 0, second = 0] = timePart.split(':').map((value) => Number(value));
