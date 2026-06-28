@@ -86,7 +86,7 @@
           </div>
           <div>
             <h3>Productos</h3>
-            <p>Administrar precios, descripcion y stock disponible.</p>
+            <p>Administrar precios, stock y estado disponible.</p>
           </div>
           <div>
             <h3>Ventas</h3>
@@ -189,7 +189,6 @@
             <strong>{{ productForm.nombre || 'Producto del inventario' }}</strong>
           </div>
           <label>Nombre<input name="productoNombre" [(ngModel)]="productForm.nombre" required></label>
-          <label>Descripcion<input name="productoDescripcion" [(ngModel)]="productForm.descripcion"></label>
           <label>Precio<input name="productoPrecio" type="number" min="0" step="0.01" [(ngModel)]="productForm.precio" required></label>
           <label>Stock<input name="productoStock" type="number" min="0" [(ngModel)]="productForm.stock" required></label>
           <div class="product-form-actions">
@@ -205,7 +204,6 @@
             <div>
               <span>ID {{ producto.idproducto }}</span>
               <h3>{{ producto.nombre }}</h3>
-              <p>{{ producto.descripcion || 'Sin descripcion' }}</p>
             </div>
             <strong>{{ producto.precio | currency:'PEN':'symbol':'1.2-2' }}</strong>
             <div class="product-state-row">
@@ -380,7 +378,6 @@
 
             <div class="product-body">
               <h2>{{ producto.nombre }}</h2>
-              <p>{{ producto.descripcion || 'Producto disponible para compra inmediata.' }}</p>
             </div>
 
             <div class="product-meta">

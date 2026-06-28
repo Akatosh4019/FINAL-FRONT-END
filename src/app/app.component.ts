@@ -31,7 +31,6 @@ interface Cliente {
 interface Producto {
   idproducto: number;
   nombre: string;
-  descripcion?: string;
   precio: number;
   stock: number;
   estado?: string | boolean;
@@ -161,7 +160,6 @@ export class AppComponent implements OnInit {
   productForm = {
     idproducto: null as number | null,
     nombre: '',
-    descripcion: '',
     precio: 0,
     stock: 0
   };
@@ -579,7 +577,6 @@ export class AppComponent implements OnInit {
 
     const payload = {
       nombre: this.productForm.nombre,
-      descripcion: this.productForm.descripcion,
       precio: Number(this.productForm.precio),
       stock: Number(this.productForm.stock)
     };
@@ -602,7 +599,6 @@ export class AppComponent implements OnInit {
     this.productForm = {
       idproducto: producto.idproducto,
       nombre: producto.nombre,
-      descripcion: producto.descripcion || '',
       precio: Number(producto.precio || 0),
       stock: Number(producto.stock || 0)
     };
@@ -645,7 +641,6 @@ export class AppComponent implements OnInit {
 
     const payload = {
       nombre: producto.nombre,
-      descripcion: producto.descripcion || '',
       precio: Number(producto.precio || 0),
       stock: Number(producto.stock || 0),
       estado: 'A'
@@ -767,7 +762,6 @@ export class AppComponent implements OnInit {
     this.productForm = {
       idproducto: null,
       nombre: '',
-      descripcion: '',
       precio: 0,
       stock: 0
     };
