@@ -332,8 +332,10 @@ export class AppComponent implements OnInit {
     this.clearAuthMessages();
   }
 
-  loadAdminDashboard(): void {
-    this.clearMessages();
+  loadAdminDashboard(clearExistingMessages = true): void {
+    if (clearExistingMessages) {
+      this.clearMessages();
+    }
     this.loading.set(true);
 
     Promise.all([
@@ -353,8 +355,10 @@ export class AppComponent implements OnInit {
       .finally(() => this.loading.set(false));
   }
 
-  loadClientStore(): void {
-    this.clearMessages();
+  loadClientStore(clearExistingMessages = true): void {
+    if (clearExistingMessages) {
+      this.clearMessages();
+    }
     this.loading.set(true);
 
     Promise.all([
@@ -436,14 +440,15 @@ export class AppComponent implements OnInit {
           this.receiptCart.set(purchasedItems);
           this.cart.set([]);
           this.success.set(response.mensaje || 'Compra realizada correctamente.');
-          this.loadClientStore();
+          this.loadClientStore(false);
           if (this.isAdmin()) {
-            this.loadAdminDashboard();
+            this.loadAdminDashboard(false);
           }
         },
         error: (err) => {
+          this.success.set('');
           this.error.set(this.readClientCheckoutError(err));
-          this.loadClientStore();
+          this.loadClientStore(false);
         }
       });
   }
