@@ -1005,18 +1005,6 @@ export class AppComponent implements OnInit {
       return fecha;
     }
 
-    const parsedAsUtc = new Date(limpia + 'Z');
-    if (!Number.isNaN(parsedAsUtc.getTime())) {
-      return new Intl.DateTimeFormat('es-PE', {
-        timeZone: 'America/Lima',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-      }).format(parsedAsUtc);
-    }
 
     const [year, month, day] = datePart.split('-');
     const [hour, minute] = timePart.split(':');
@@ -1053,22 +1041,6 @@ export class AppComponent implements OnInit {
     }
 
     const limpia = fecha.split('.')[0];
-    const parsedAsUtc = new Date(limpia + 'Z');
-    if (!Number.isNaN(parsedAsUtc.getTime())) {
-      const parts = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/Lima',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hourCycle: 'h23'
-      }).formatToParts(parsedAsUtc);
-      const value = (type: string) => parts.find((part) => part.type === type)?.value ?? '00';
-
-      return Number(value('year') + value('month') + value('day') + value('hour') + value('minute') + value('second'));
-    }
 
     const [datePart, timePart = '00:00:00'] = limpia.split('T');
     const [year, month, day] = datePart.split('-').map((value) => Number(value));
