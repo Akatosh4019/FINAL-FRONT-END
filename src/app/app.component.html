@@ -215,7 +215,8 @@
             <b [class.low]="producto.stock < 10">{{ producto.stock }}</b>
             <div class="row-actions">
               <button class="mini" type="button" (click)="editProducto(producto)">Editar</button>
-              <button class="mini danger" type="button" (click)="deactivateProducto(producto)" [disabled]="actionLoading() || !isProductoActive(producto)">Desactivar producto</button>
+              <button class="mini danger" type="button" *ngIf="isProductoActive(producto)" (click)="deactivateProducto(producto)" [disabled]="actionLoading()">Desactivar producto</button>
+              <button class="mini success-mini" type="button" *ngIf="!isProductoActive(producto)" (click)="activateProducto(producto)" [disabled]="actionLoading()">Activar producto</button>
             </div>
           </article>
         </div>

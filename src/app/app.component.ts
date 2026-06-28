@@ -588,6 +588,36 @@ export class AppComponent implements OnInit {
         error: (err) => this.error.set(this.readError(err, 'No se pudo desactivar el producto.'))
       });
   }
+
+  activateProducto(producto: Producto): void {
+    this.clearMessages();
+
+    if (this.isProductoActive(producto)) {
+      this.success.set('El producto ya esta activo.');
+      return;
+    }
+
+    this.actionLoading.set(true);
+
+    const payload = {
+      nombre: producto.nombre,
+      descripcion: producto.descripcion || '',
+      precio: Number(producto.precio || 0),
+      stock: Number(producto.stock || 0),
+      estado: 'A'
+    };
+
+    this.http.put<Producto>(`/api/productos/${producto.idproducto}`, payload)
+      .pipe(finalize(() => this.actionLoading.set(false)))
+      .subscribe({
+        next: () => {
+          this.success.set('Producto activado correctamente.');
+          this.loadAdminDashboard();
+          this.loadClientStore();
+        },
+        error: (err) => this.error.set(this.readError(err, 'No se pudo activar el producto.'))
+      });
+  }
   saveCliente(): void {
     this.clearMessages();
     this.actionLoading.set(true);

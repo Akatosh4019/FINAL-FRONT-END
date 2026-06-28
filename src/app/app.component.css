@@ -2147,3 +2147,8 @@ th {
   display: flex;
   align-items: center;
 }
+
+.success-mini {
+  background: #dcfce7;
+  color: #047857;
+}
