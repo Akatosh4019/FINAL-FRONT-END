@@ -44,6 +44,7 @@ interface Venta {
   total?: number;
   estado?: string;
   fecha?: string;
+  sagaId?: string;
 }
 
 interface SagaResponse {
@@ -51,12 +52,41 @@ interface SagaResponse {
   estado?: string;
   mensaje?: string;
   venta?: Venta;
+  ventas?: Venta[];
+  total?: number;
 }
 
-type AdminTab = 'resumen' | 'clientes' | 'productos' | 'ventas' | 'saga';
+interface CartItem {
+  producto: Producto;
+  cantidad: number;
+}
+
+interface SagaLog {
+  id: number;
+  sagaId: string;
+  idcliente: number;
+  tipo: string;
+  estado: string;
+  pasoFallido?: string;
+  mensajeCliente?: string;
+  detalleTecnico?: string;
+  stockCompensado?: boolean;
+  fecha?: string;
+}
+
+interface PurchaseGroup {
+  key: string;
+  sagaId?: string;
+  fecha?: string;
+  estado?: string;
+  ventas: Venta[];
+  total: number;
+}
+
+type AdminTab = 'resumen' | 'clientes' | 'productos' | 'ventas' | 'logs' | 'saga';
 type ClientTab = 'tienda' | 'historial';
 
-type Trackable = Cliente | Producto | Venta;
+type Trackable = Cliente | Producto | Venta | SagaLog;
 
 @Component({
   selector: 'app-root',
@@ -75,6 +105,8 @@ export class AppComponent implements OnInit {
   readonly clientTab = signal<ClientTab>('tienda');
   readonly authMode = signal<'login' | 'register'>('login');
   readonly showAdminLogin = signal(false);
+  readonly showProductForm = signal(false);
+  readonly actingAsClient = signal(false);
   readonly loading = signal(false);
   readonly actionLoading = signal(false);
   readonly error = signal('');
@@ -87,6 +119,10 @@ export class AppComponent implements OnInit {
   readonly productos = signal<Producto[]>([]);
   readonly ventas = signal<Venta[]>([]);
   readonly misVentas = signal<Venta[]>([]);
+  readonly sagaLogs = signal<SagaLog[]>([]);
+  readonly cart = signal<CartItem[]>([]);
+  readonly receiptCart = signal<CartItem[]>([]);
+  readonly selectedReceipt = signal<PurchaseGroup | null>(null);
   readonly lastSaga = signal<SagaResponse | null>(null);
 
   clientLogin = {
@@ -113,6 +149,8 @@ export class AppComponent implements OnInit {
     cantidad: 1
   };
 
+  productQuantities: Record<number, number> = {};
+
   adminSaleForm = {
     idcliente: 1,
     idproducto: 21,
@@ -129,6 +167,8 @@ export class AppComponent implements OnInit {
 
   clienteForm = {
     idcliente: null as number | null,
+    username: '',
+    password: '',
     nombres: '',
     apellidos: '',
     correo: '',
@@ -139,6 +179,7 @@ export class AppComponent implements OnInit {
   readonly isLoggedIn = computed(() => Boolean(this.token()));
   readonly isAdmin = computed(() => this.role() === 'ROLE_ADMIN');
   readonly isClient = computed(() => this.role() === 'ROLE_CLIENTE');
+  readonly canUseClientStore = computed(() => Boolean(this.idcliente()) && (this.isClient() || this.isAdmin()));
 
   readonly selectedAdminCliente = computed(() =>
     this.clientes().find((cliente) => cliente.idcliente === Number(this.adminSaleForm.idcliente))
@@ -162,8 +203,55 @@ export class AppComponent implements OnInit {
     return producto ? producto.precio * Number(this.clientBuyForm.cantidad || 0) : 0;
   });
 
+  readonly cartTotal = computed(() =>
+    this.cart().reduce((sum, item) => sum + item.producto.precio * item.cantidad, 0)
+  );
+
+  readonly cartCount = computed(() =>
+    this.cart().reduce((sum, item) => sum + item.cantidad, 0)
+  );
+
+  readonly receiptTotal = computed(() =>
+    this.lastSaga()?.total ?? this.receiptCart().reduce((sum, item) => sum + item.producto.precio * item.cantidad, 0)
+  );
+
+  readonly purchaseGroups = computed<PurchaseGroup[]>(() => {
+    const groups = new Map<string, PurchaseGroup>();
+
+    for (const venta of this.misVentas()) {
+      const key = venta.sagaId || `venta-${venta.idventa}`;
+      const producto = this.productos().find((item) => item.idproducto === venta.idproducto);
+      const total = Number(venta.total ?? ((producto?.precio || 0) * Number(venta.cantidad || 0)));
+      const current = groups.get(key);
+
+      if (current) {
+        current.ventas.push(venta);
+        current.total += total;
+        current.estado = current.estado || venta.estado;
+        current.fecha = current.fecha || venta.fecha;
+      } else {
+        groups.set(key, {
+          key,
+          sagaId: venta.sagaId,
+          fecha: venta.fecha,
+          estado: venta.estado,
+          ventas: [venta],
+          total
+        });
+      }
+    }
+
+    return Array.from(groups.values()).sort((a, b) =>
+      new Date(b.fecha || 0).getTime() - new Date(a.fecha || 0).getTime()
+    );
+  });
+
   readonly activeClientes = computed(() =>
     this.clientes().filter((cliente) => this.isClienteActive(cliente)).length
+  );
+
+  readonly inactiveClientes = computed(() =>
+    this.clientes().filter((cliente) => !this.isClienteActive(cliente)).length
   );
 
   readonly totalStock = computed(() =>
@@ -179,6 +267,7 @@ export class AppComponent implements OnInit {
   ngOnInit(): void {
     if (this.isAdmin()) {
       this.loadAdminDashboard();
+      this.loadClientStore();
     }
     if (this.isClient()) {
       this.loadClientStore();
@@ -229,12 +318,17 @@ export class AppComponent implements OnInit {
     this.productos.set([]);
     this.ventas.set([]);
     this.misVentas.set([]);
+    this.sagaLogs.set([]);
+    this.cart.set([]);
+    this.receiptCart.set([]);
+    this.selectedReceipt.set(null);
     this.lastSaga.set(null);
     this.adminTab.set('resumen');
     this.clientTab.set('tienda');
     this.showAdminLogin.set(false);
+    this.actingAsClient.set(false);
     this.clearMessages();
-      this.clearAuthMessages();
+    this.clearAuthMessages();
   }
 
   loadAdminDashboard(): void {
@@ -244,12 +338,14 @@ export class AppComponent implements OnInit {
     Promise.all([
       firstValueFrom(this.http.get<Cliente[] | { value: Cliente[] }>('/api/clientes')),
       firstValueFrom(this.http.get<Producto[] | { value: Producto[] }>('/api/productos')),
-      firstValueFrom(this.http.get<Venta[] | { value: Venta[] }>('/api/ventas'))
+      firstValueFrom(this.http.get<Venta[] | { value: Venta[] }>('/api/ventas')),
+      firstValueFrom(this.http.get<SagaLog[] | { value: SagaLog[] }>('/api/ventas/saga-logs'))
     ])
-      .then(([clientes, productos, ventas]) => {
+      .then(([clientes, productos, ventas, sagaLogs]) => {
         this.clientes.set(this.asArray<Cliente>(clientes));
         this.productos.set(this.asArray<Producto>(productos));
         this.ventas.set(this.asArray<Venta>(ventas));
+        this.sagaLogs.set(this.asArray<SagaLog>(sagaLogs));
         this.ensureDefaultSelections();
       })
       .catch((err) => this.error.set(this.readError(err, 'No se pudieron cargar los datos de administracion.')))
@@ -275,31 +371,124 @@ export class AppComponent implements OnInit {
 
   createClientSale(producto?: Producto): void {
     if (producto) {
-      this.clientBuyForm.idproducto = producto.idproducto;
+      this.addToCart(producto, this.productQuantities[producto.idproducto] || 1);
+      return;
     }
 
+    const selected = this.selectedClientProducto();
+    if (selected) {
+      this.addToCart(selected, Number(this.clientBuyForm.cantidad || 1));
+    }
+  }
+
+  addToCart(producto: Producto, cantidad = 1): void {
     this.clearMessages();
+    const safeQuantity = Math.max(1, Number(cantidad || 1));
+    const current = [...this.cart()];
+    const existing = current.find((item) => item.producto.idproducto === producto.idproducto);
+
+    if (existing) {
+      existing.cantidad = safeQuantity;
+    } else {
+      current.push({ producto, cantidad: safeQuantity });
+    }
+
+    this.cart.set(current);
+    this.success.set('Carrito actualizado.');
+  }
+
+  updateCartItem(producto: Producto, cantidad: number): void {
+    const safeQuantity = Math.max(1, Number(cantidad || 1));
+    this.cart.set(this.cart().map((item) =>
+      item.producto.idproducto === producto.idproducto ? { ...item, cantidad: safeQuantity } : item
+    ));
+  }
+
+  removeCartItem(producto: Producto): void {
+    this.cart.set(this.cart().filter((item) => item.producto.idproducto !== producto.idproducto));
+  }
+
+  checkoutCart(): void {
+    this.clearMessages();
+
+    if (!this.cart().length) {
+      this.error.set('Agrega al menos un producto al carrito.');
+      return;
+    }
+
     this.actionLoading.set(true);
     this.lastSaga.set(null);
 
+    const purchasedItems = this.cart().map((item) => ({ ...item }));
     const payload = {
-      idproducto: Number(this.clientBuyForm.idproducto),
-      cantidad: Number(this.clientBuyForm.cantidad)
+      items: this.cart().map((item) => ({
+        idproducto: item.producto.idproducto,
+        cantidad: item.cantidad
+      }))
     };
 
-    this.http.post<SagaResponse>('/api/ventas/saga/cliente', payload)
+    this.http.post<SagaResponse>('/api/ventas/saga/carrito/cliente', payload)
       .pipe(finalize(() => this.actionLoading.set(false)))
       .subscribe({
         next: (response) => {
           this.lastSaga.set(response);
-          this.success.set(response.mensaje || 'Compra completada. Tu venta fue registrada.');
+          this.receiptCart.set(purchasedItems);
+          this.cart.set([]);
+          this.success.set(response.mensaje || 'Compra realizada correctamente.');
           this.loadClientStore();
+          if (this.isAdmin()) {
+            this.loadAdminDashboard();
+          }
         },
         error: (err) => {
-          this.error.set(this.readError(err, 'La compra no se pudo completar.'));
+          this.error.set(this.readClientCheckoutError(err));
           this.loadClientStore();
         }
       });
+  }
+
+  viewPurchaseReceipt(group: PurchaseGroup): void {
+    const receiptItems = group.ventas.map((venta) => {
+      const product = this.productos().find((item) => item.idproducto === venta.idproducto);
+      const unitPrice = venta.cantidad ? Number(venta.total ?? 0) / venta.cantidad : product?.precio || 0;
+
+      return {
+        producto: product || {
+          idproducto: venta.idproducto,
+          nombre: `Producto ${venta.idproducto}`,
+          precio: unitPrice,
+          stock: 0
+        },
+        cantidad: venta.cantidad
+      };
+    });
+
+    this.selectedReceipt.set(group);
+    this.receiptCart.set(receiptItems);
+    this.lastSaga.set({
+      sagaId: group.sagaId,
+      estado: group.estado || 'REGISTRADA',
+      mensaje: 'Compra registrada correctamente.',
+      ventas: group.ventas,
+      total: group.total
+    });
+  }
+
+  closeReceipt(): void {
+    this.lastSaga.set(null);
+    this.receiptCart.set([]);
+    this.selectedReceipt.set(null);
+  }
+
+  showAdminPanel(): void {
+    this.actingAsClient.set(false);
+    this.loadAdminDashboard();
+  }
+
+  showClientStore(): void {
+    this.actingAsClient.set(true);
+    this.clientTab.set('tienda');
+    this.loadClientStore();
   }
 
   createAdminSale(): void {
@@ -346,7 +535,7 @@ export class AppComponent implements OnInit {
     request.pipe(finalize(() => this.actionLoading.set(false))).subscribe({
       next: () => {
         this.success.set(this.productForm.idproducto ? 'Producto actualizado.' : 'Producto creado.');
-        this.resetProductoForm();
+        this.closeProductoForm();
         this.loadAdminDashboard();
       },
       error: (err) => this.error.set(this.readError(err, 'No se pudo guardar el producto.'))
@@ -362,6 +551,7 @@ export class AppComponent implements OnInit {
       stock: Number(producto.stock || 0)
     };
     this.adminTab.set('productos');
+    this.showProductForm.set(true);
     this.clearMessages();
   }
 
@@ -384,31 +574,57 @@ export class AppComponent implements OnInit {
     this.clearMessages();
     this.actionLoading.set(true);
 
+    if (!this.clienteForm.idcliente) {
+      const registerPayload = {
+        username: this.clienteForm.username,
+        password: this.clienteForm.password,
+        nombres: this.clienteForm.nombres,
+        apellidos: this.clienteForm.apellidos,
+        correo: this.clienteForm.correo,
+        telefono: this.clienteForm.telefono
+      };
+
+      this.http.post<RegisterResponse>('/api/auth/register-cliente', registerPayload)
+        .pipe(finalize(() => this.actionLoading.set(false)))
+        .subscribe({
+          next: () => {
+            this.success.set('Cuenta cliente creada con usuario para iniciar sesion.');
+            this.resetClienteForm();
+            this.loadAdminDashboard();
+          },
+          error: (err) => this.error.set(this.readError(err, 'No se pudo crear la cuenta cliente.'))
+        });
+      return;
+    }
+
     const payload = {
       nombres: this.clienteForm.nombres,
       apellidos: this.clienteForm.apellidos,
       correo: this.clienteForm.correo,
       telefono: this.clienteForm.telefono,
-      estado: this.clienteForm.estado
+      estado: this.clienteForm.estado ? 'A' : 'I'
     };
 
-    const request = this.clienteForm.idcliente
-      ? this.http.put<Cliente>(`/api/clientes/${this.clienteForm.idcliente}`, payload)
-      : this.http.post<Cliente>('/api/clientes', payload);
+    if (this.isClienteFormProtected()) {
+      payload.estado = 'A';
+    }
 
-    request.pipe(finalize(() => this.actionLoading.set(false))).subscribe({
-      next: () => {
-        this.success.set(this.clienteForm.idcliente ? 'Cliente actualizado.' : 'Cliente creado.');
-        this.resetClienteForm();
-        this.loadAdminDashboard();
-      },
-      error: (err) => this.error.set(this.readError(err, 'No se pudo guardar el cliente.'))
-    });
+    this.http.put<Cliente>(`/api/clientes/${this.clienteForm.idcliente}`, payload)
+      .pipe(finalize(() => this.actionLoading.set(false)))
+      .subscribe({
+        next: () => {
+          this.success.set('Cliente actualizado.');
+          this.resetClienteForm();
+          this.loadAdminDashboard();
+        },
+        error: (err) => this.error.set(this.readError(err, 'No se pudo guardar el cliente.'))
+      });
   }
-
   editCliente(cliente: Cliente): void {
     this.clienteForm = {
       idcliente: cliente.idcliente,
+      username: '',
+      password: '',
       nombres: cliente.nombres,
       apellidos: cliente.apellidos,
       correo: cliente.correo,
@@ -419,19 +635,40 @@ export class AppComponent implements OnInit {
     this.clearMessages();
   }
 
-  deleteCliente(cliente: Cliente): void {
+  deactivateCliente(cliente: Cliente): void {
     this.clearMessages();
+
+    if (this.isProtectedAdminCliente(cliente)) {
+      this.error.set('El cliente administrador no se puede desactivar.');
+      return;
+    }
+
+    if (!this.isClienteActive(cliente)) {
+      this.success.set('El cliente ya esta inactivo.');
+      return;
+    }
+
     this.actionLoading.set(true);
 
-    this.http.delete(`/api/clientes/${cliente.idcliente}`)
+    this.http.delete<Cliente>(`/api/clientes/${cliente.idcliente}`)
       .pipe(finalize(() => this.actionLoading.set(false)))
       .subscribe({
         next: () => {
-          this.success.set('Cliente eliminado.');
+          this.success.set('Cliente desactivado correctamente.');
           this.loadAdminDashboard();
         },
-        error: (err) => this.error.set(this.readError(err, 'No se pudo eliminar el cliente.'))
+        error: (err) => this.error.set(this.readError(err, 'No se pudo desactivar el cliente.'))
       });
+  }
+  openProductoForm(): void {
+    this.resetProductoForm();
+    this.showProductForm.set(true);
+    this.clearMessages();
+  }
+
+  closeProductoForm(): void {
+    this.resetProductoForm();
+    this.showProductForm.set(false);
   }
 
   resetProductoForm(): void {
@@ -447,6 +684,8 @@ export class AppComponent implements OnInit {
   resetClienteForm(): void {
     this.clienteForm = {
       idcliente: null,
+      username: '',
+      password: '',
       nombres: '',
       apellidos: '',
       correo: '',
@@ -471,6 +710,9 @@ export class AppComponent implements OnInit {
   }
 
   trackById(_index: number, item: Trackable): number {
+    if ('id' in item) {
+      return item.id;
+    }
     if ('idventa' in item) {
       return item.idventa;
     }
@@ -495,6 +737,7 @@ export class AppComponent implements OnInit {
 
           if (this.isAdmin()) {
             this.showAdminLogin.set(false);
+            this.actingAsClient.set(false);
             this.loadAdminDashboard();
             return;
           }
@@ -546,8 +789,23 @@ export class AppComponent implements OnInit {
     }
   }
 
-  private isClienteActive(cliente: Cliente): boolean {
+  isClienteActive(cliente: Cliente): boolean {
     return cliente.estado === true || cliente.estado === 'A' || cliente.estado === 'ACTIVO';
+  }
+
+  isProtectedAdminCliente(cliente: Pick<Cliente, 'idcliente' | 'correo'>): boolean {
+    return Number(cliente.idcliente) === 1 || cliente.correo === 'admin@saga.local';
+  }
+
+  isClienteFormProtected(): boolean {
+    return Boolean(this.clienteForm.idcliente) && this.isProtectedAdminCliente({
+      idcliente: Number(this.clienteForm.idcliente),
+      correo: this.clienteForm.correo
+    });
+  }
+
+  clienteEstadoLabel(cliente: Cliente): string {
+    return this.isClienteActive(cliente) ? 'Activo' : 'Inactivo';
   }
 
   clearMessages(): void {
@@ -579,6 +837,16 @@ export class AppComponent implements OnInit {
     return [];
   }
 
+  private readClientCheckoutError(err: unknown): string {
+    if (err instanceof HttpErrorResponse) {
+      const body = err.error;
+      if (err.status === 409) {
+        return body?.message || 'No se pudo completar la compra: no hay stock suficiente.';
+      }
+      return 'No se pudo completar la compra. Intenta nuevamente.';
+    }
+    return 'No se pudo completar la compra. Intenta nuevamente.';
+  }
   private readError(err: unknown, fallback: string): string {
     if (err instanceof HttpErrorResponse) {
       const body = err.error;
