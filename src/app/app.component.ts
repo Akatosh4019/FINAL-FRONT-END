@@ -354,18 +354,20 @@ export class AppComponent implements OnInit {
           firstError = firstError || clientes.error;
         }
 
+        const ventasList = ventas.ok ? this.asArray<Venta>(ventas.value) : [];
+
+        if (ventas.ok) {
+          this.ventas.set(ventasList);
+        } else {
+          firstError = firstError || ventas.error;
+        }
+
         if (productos.ok) {
           const productosList = this.asArray<Producto>(productos.value);
           this.productos.set(productosList);
-          await this.loadProductSaleCounts(productosList);
+          await this.loadProductSaleCounts(productosList, ventasList);
         } else {
           firstError = firstError || productos.error;
-        }
-
-        if (ventas.ok) {
-          this.ventas.set(this.asArray<Venta>(ventas.value));
-        } else {
-          firstError = firstError || ventas.error;
         }
 
         if (sagaLogs.ok) {
@@ -394,17 +396,26 @@ export class AppComponent implements OnInit {
       .finally(() => this.loading.set(false));
   }
 
-  private async loadProductSaleCounts(productos = this.productos()): Promise<void> {
+  private async loadProductSaleCounts(productos = this.productos(), ventas = this.ventas()): Promise<void> {
+    const fallbackCounts = this.countVentasByProducto(ventas);
     const entries = await Promise.all(productos.map(async (producto) => {
+      const fallbackCount = fallbackCounts[producto.idproducto] ?? 0;
       try {
         const count = await firstValueFrom(this.http.get<number>(`/api/ventas/producto/${producto.idproducto}/conteo`));
-        return [producto.idproducto, Number(count || 0)] as const;
+        return [producto.idproducto, Number(count ?? fallbackCount)] as const;
       } catch {
-        return [producto.idproducto, 1] as const;
+        return [producto.idproducto, fallbackCount] as const;
       }
     }));
 
     this.productSaleCounts.set(Object.fromEntries(entries));
+  }
+
+  private countVentasByProducto(ventas: Venta[]): Record<number, number> {
+    return ventas.reduce<Record<number, number>>((counts, venta) => {
+      counts[venta.idproducto] = (counts[venta.idproducto] || 0) + 1;
+      return counts;
+    }, {});
   }
   loadClientStore(clearExistingMessages = true): void {
     if (clearExistingMessages) {
@@ -940,7 +951,7 @@ export class AppComponent implements OnInit {
   }
 
   productoVentaCount(producto: Producto): number {
-    return this.productSaleCounts()[producto.idproducto] ?? 1;
+    return this.productSaleCounts()[producto.idproducto] ?? 0;
   }
 
   canDeleteProducto(producto: Producto): boolean {
