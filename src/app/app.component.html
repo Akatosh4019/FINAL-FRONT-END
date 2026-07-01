@@ -2,9 +2,9 @@
   <main class="shell" *ngIf="isAdmin() && !actingAsClient(); else clientDashboard">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">SV</div>
+        <div class="brand-mark">VS</div>
         <div>
-          <strong>Saga Ventas</strong>
+          <strong>Valencia Store</strong>
           <span>Administracion total</span>
         </div>
       </div>
@@ -339,9 +339,9 @@
   <main class="client-app">
     <header class="shop-header compact">
       <div class="brand light">
-        <div class="brand-mark">SV</div>
+        <div class="brand-mark">VS</div>
         <div>
-          <strong>Saga Store</strong>
+          <strong>Valencia Store</strong>
           <span>{{ username() }} · {{ role() }}</span>
         </div>
       </div>
@@ -509,12 +509,19 @@
 <ng-template #publicView>
   <main class="public-page">
     <button class="admin-peek" type="button" (click)="showAdminLogin.set(true)">Admin</button>
+    <div class="valencia-star" aria-hidden="true">
+      <svg viewBox="0 0 600 600" focusable="false">
+        <path class="star-line star-up" d="M300 62 518 440H82Z"></path>
+        <path class="star-line star-down" d="M300 538 82 160h436Z"></path>
+        <circle class="star-core" cx="300" cy="300" r="104"></circle>
+      </svg>
+    </div>
 
     <section class="public-hero">
       <div class="hero-panel">
-        <p class="eyebrow">Saga Store</p>
-        <h1>Compra productos con una experiencia rapida, segura y coordinada por microservicios.</h1>
-        <p>Registrate como cliente, inicia sesion y compra sin enviar tu id: el backend reconoce tu cliente desde el token.</p>
+        <p class="eyebrow">Valencia Store</p>
+        <h1>Compra en Valencia Store con una experiencia rapida, segura y coordinada.</h1>
+        <p>Registrate como cliente, inicia sesion y disfruta una tienda moderna conectada por microservicios.</p>
         <div class="hero-metrics">
           <span><b>JWT</b> acceso seguro</span>
           <span><b>Saga</b> stock consistente</span>
